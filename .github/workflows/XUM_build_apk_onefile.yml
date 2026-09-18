@@ -30,9 +30,9 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+                    java-version: '17'
 
-            - name: Instalar Android SDK 35
+      - name: Instalar Android SDK 35
         shell: bash
         run: |
           export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
