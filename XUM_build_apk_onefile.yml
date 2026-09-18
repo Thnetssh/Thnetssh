@@ -1,0 +1,115 @@
+name: Build XUM Emulador 6 APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Baixar repositório e histórico
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Recuperar projeto XUM da versão completa
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          OLD_COMMIT="6a37fa335b8bc4888a66d5d38812dbb1463366fd"
+          OLD_WORKFLOW="/tmp/XUM_build_apk_old.yml"
+          CREATE_SCRIPT="/tmp/create_xum_project.sh"
+
+          git show "$OLD_COMMIT:.github/workflows/XUM_build_apk_onefile.yml" > "$OLD_WORKFLOW"
+
+          awk '
+            /- name: Criar projeto Android/ { in_step=1; next }
+            in_step && /run: \|/ { in_run=1; next }
+            in_run && /^      - name: Java 17/ { exit }
+            in_run {
+              sub(/^          /, "")
+              print
+            }
+          ' "$OLD_WORKFLOW" > "$CREATE_SCRIPT"
+
+          test -s "$CREATE_SCRIPT"
+          bash "$CREATE_SCRIPT"
+
+          test -f settings.gradle
+          test -f build.gradle
+          test -f app/build.gradle
+          test -f app/src/main/AndroidManifest.xml
+          test -f app/src/main/java/com/thnetssh/xumemulador6/MainActivity.java
+          test -f app/src/main/assets/index.html
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Instalar Android SDK 35
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          ANDROID_SDK_ROOT="$ANDROID_HOME"
+
+          SDKMANAGER="$(command -v sdkmanager || true)"
+          if [ -z "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager 2>/dev/null | sort -V | tail -n 1)"
+          fi
+
+          if [ -z "$SDKMANAGER" ]; then
+            echo "ERRO: sdkmanager não encontrado em $ANDROID_HOME"
+            exit 1
+          fi
+
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+
+      - name: Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Compilar APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon assembleDebug
+
+      - name: Verificar APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -lh app/build/outputs/apk/debug/
+          test -f app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Renomear APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp app/build/outputs/apk/debug/app-debug.apk XUM_Emulador_6.apk
+          ls -lh XUM_Emulador_6.apk
+
+      - name: Publicar APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: XUM-Emulador-6-APK
+          path: XUM_Emulador_6.apk
+          if-no-files-found: error
